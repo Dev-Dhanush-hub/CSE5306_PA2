@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  coordinator:
+    build:
+      context: .
+      dockerfile: Coordinator.Dockerfile
+    environment:
+      - PORT=50051
+    ports:
+      - "8080:8080"
+    depends_on:
+      - participant_1
+      - participant_2
+    networks:
+      - coordinator_network
+
+  participant_1:
+    build:
+      context: .
+      dockerfile: Participant.Dockerfile
+    environment:
+      - PORT=50052
+    ports:
+      - "8081:8081"
+    networks:
+      - coordinator_network
+
+  participant_2:
+    build:
+      context: .
+      dockerfile: Participant.Dockerfile
+    environment:
+      - PORT=50053
+    ports:
+      - "8082:8082"
+    networks:
+      - coordinator_network
+
+networks:
+    coordinator_network:
+        driver: bridge
