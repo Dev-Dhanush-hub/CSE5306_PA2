@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package raft;
+
+// The message sent from one node to request a vote
+message VoteRequest {
+  int32 term = 1;              // Current term of the sender
+  string candidateId = 2;      // ID of the candidate requesting vote
+  int32 lastLogIndex = 3;      // Index of candidate's last log entry
+  int32 lastLogTerm = 4;       // Term of candidate's last log entry
+}
+
+// The message sent in response to a VoteRequest
+message VoteResponse {
+  int32 term = 1;              // Current term of the responder
+  bool voteGranted = 2;        // True means candidate received vote
+}
+
+// Service definition for Raft RPCs
+service Raft {
+  // RequestVote RPC
+  rpc RequestVote(VoteRequest) returns (VoteResponse);
+}
