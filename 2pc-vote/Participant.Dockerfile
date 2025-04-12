@@ -6,6 +6,8 @@ COPY participant.py .
 
 RUN mkdir -p proto
 
+RUN mkdir -p db
+
 COPY ./proto ./proto/
 
 RUN pip install grpcio grpcio-tools

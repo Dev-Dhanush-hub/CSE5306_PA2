@@ -2,17 +2,42 @@ import os
 import grpc
 import time
 import json
+import sqlite3
 from concurrent import futures
 from threading import Lock
 from proto import transaction_pb2, transaction_pb2_grpc
 
 PARTICIPANTS_FILE = "participants.json"
+DB_FILE = "db/kv_store.db"
 
 class CoordinatorServicer(transaction_pb2_grpc.CoordinatorServicer):
     def __init__(self):
         self.lock = Lock()
+        self.db_lock = Lock()
+        self.conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        self.create_kv_table()
         self.participants = self.load_participants()
         print(f"[Coordinator] Active participants: {self.participants}")
+
+    def create_kv_table(self):
+        with self.db_lock:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS kv_store (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            self.conn.commit()
+
+    def save_kv_pair(self, key, value):
+        with self.db_lock:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO kv_store (key, value)
+                VALUES (?, ?)
+            """, (key, value))
+            self.conn.commit()
 
     def load_participants(self):
         if os.path.exists(PARTICIPANTS_FILE):
@@ -39,7 +64,16 @@ class CoordinatorServicer(transaction_pb2_grpc.CoordinatorServicer):
 
     def StartTransaction(self, request, context):
         transaction_id = request.transaction_id
-        print(f"[Coordinator] Starting transaction {transaction_id}")
+        payload = request.payload
+        print(f"[Coordinator] Starting transaction {transaction_id} with payload {payload}")
+
+        try:
+            data = json.loads(payload)
+            key = data["key"]
+            value = data["value"]
+        except (json.JSONDecodeError, KeyError):
+            print(f"[Coordinator] Invalid payload format")
+            return transaction_pb2.Response(transaction_id=transaction_id, status="ABORTED")
 
         responses = []
 
@@ -47,7 +81,7 @@ class CoordinatorServicer(transaction_pb2_grpc.CoordinatorServicer):
             try:
                 channel = grpc.insecure_channel(address)
                 stub = transaction_pb2_grpc.ParticipantStub(channel)
-                response = stub.Prepare(transaction_pb2.Request(transaction_id=transaction_id, payload=request.payload))
+                response = stub.Prepare(transaction_pb2.Request(transaction_id=transaction_id, payload=payload))
                 responses.append(response.status)
             except Exception as e:
                 print(f"[Coordinator] Error contacting {address}: {e}")
@@ -57,14 +91,19 @@ class CoordinatorServicer(transaction_pb2_grpc.CoordinatorServicer):
             print(f"[Coordinator] All participants ready. Sending COMMIT.")
             for address in self.participants:
                 stub = transaction_pb2_grpc.ParticipantStub(grpc.insecure_channel(address))
-                stub.Commit(transaction_pb2.Request(transaction_id=transaction_id, payload=request.payload))
+                stub.Commit(transaction_pb2.Request(transaction_id=transaction_id, payload=payload))
+
+            self.save_kv_pair(key, value)
             return transaction_pb2.Response(transaction_id=transaction_id, status="COMMITTED")
         else:
             print(f"[Coordinator] Not all participants ready. Sending ABORT.")
             for address in self.participants:
                 stub = transaction_pb2_grpc.ParticipantStub(grpc.insecure_channel(address))
-                stub.Abort(transaction_pb2.Request(transaction_id=transaction_id, payload=request.payload))
+                stub.Abort(transaction_pb2.Request(transaction_id=transaction_id, payload=payload))
+
             return transaction_pb2.Response(transaction_id=transaction_id, status="ABORTED")
+
+
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
@@ -77,10 +116,7 @@ def serve():
 
 
 if __name__ == "__main__":
-    # Check if the participants file exists
     if not os.path.exists(PARTICIPANTS_FILE):
-        # Create the file with an empty list
         with open(PARTICIPANTS_FILE, "w") as f:
             json.dump([], f)
-
     serve()

@@ -6,7 +6,8 @@ services:
       context: .
       dockerfile: Coordinator.Dockerfile
     environment:
-      - PORT=50051
+      - PORT=8080
+      - PARTICIPANTS_FILE=participants.json
     ports:
       - "8080:8080"
     depends_on:
@@ -20,7 +21,9 @@ services:
       context: .
       dockerfile: Participant.Dockerfile
     environment:
-      - PORT=50052
+      - PORT=8081
+      - COORDINATOR_ADDRESS=coordinator:8080
+      - HOSTNAME=participant_1
     ports:
       - "8081:8081"
     networks:
@@ -31,12 +34,14 @@ services:
       context: .
       dockerfile: Participant.Dockerfile
     environment:
-      - PORT=50053
+      - PORT=8082
+      - COORDINATOR_ADDRESS=coordinator:8080
+      - HOSTNAME=participant_2
     ports:
       - "8082:8082"
     networks:
       - coordinator_network
 
 networks:
-    coordinator_network:
-        driver: bridge
+  coordinator_network:
+    driver: bridge
