@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   coordinator:
     build:
       context: .
-      dockerfile: Docker/Coordinator.javascript.Dockerfile
+      dockerfile: Docker/Coordinator.python.Dockerfile
     environment:
       - PORT=8080
       - PARTICIPANTS_FILE=participants.json

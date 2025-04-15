@@ -1,9 +1,7 @@
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
-const os = require('os');
 
 const PROTO_PATH = './proto/raft.proto';
-
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
     keepCase: true,
     longs: String,
@@ -25,34 +23,50 @@ class RaftNode {
         this.lastHeartbeat = Date.now();
         this.electionTimeout = this.resetElectionTimeout();
 
-        // Start election timer and heartbeat sender
+        this.log = []; // Array of { term, command }
+        this.commitIndex = -1;
+        this.lastApplied = -1;
+
+        this.nextIndex = {};
+        this.matchIndex = {};
+
         setInterval(() => this.electionTimer(), 100);
-        setInterval(() => this.heartbeatSender(), 1000);
+        setInterval(() => this.heartbeatSender(), 500);
+        setInterval(() => this.applyCommittedEntries(), 300);
+        // setInterval(() => this.simulateClientCommand(), 5000); // Test: simulate a client request
     }
 
     resetElectionTimeout() {
-        const timeout = Math.random() * 1500 + 1500;
-        console.log(`[Node ${this.nodeId}] Election timeout reset to ${timeout.toFixed(0)} ms`);
-        return timeout;
+        return Math.random() * 1500 + 1500;
     }
 
-    // ===== RPC Handlers =====
+    ClientRequest(call, callback) {
+        if (this.state !== 'leader') {
+            return callback(null, {
+                success: false,
+                message: `Not the leader. Current leader: ${this.leaderId || 'unknown'}`
+            });
+        }
+
+        const command = call.request.command;
+        this.log.push({ term: this.currentTerm, command });
+        console.log(`[Node ${this.nodeId}] Accepted client command: ${command}`);
+        callback(null, { success: true, message: `Command '${command}' added to log` });
+    }
 
     RequestVote(call, callback) {
-        const request = call.request;
-        console.log(`[Node ${this.nodeId}] RPC RequestVote from Node ${request.candidateId} | Term ${request.term}`);
-
-        if (request.term < this.currentTerm) {
+        const req = call.request;
+        if (req.term < this.currentTerm) {
             return callback(null, { term: this.currentTerm, voteGranted: false });
         }
 
-        if (request.term > this.currentTerm) {
-            this.currentTerm = request.term;
+        if (req.term > this.currentTerm) {
+            this.currentTerm = req.term;
             this.votedFor = null;
         }
 
-        if (!this.votedFor || this.votedFor === request.candidateId) {
-            this.votedFor = request.candidateId;
+        if (!this.votedFor || this.votedFor === req.candidateId) {
+            this.votedFor = req.candidateId;
             this.state = 'follower';
             this.lastHeartbeat = Date.now();
             return callback(null, { term: this.currentTerm, voteGranted: true });
@@ -62,31 +76,38 @@ class RaftNode {
     }
 
     AppendEntries(call, callback) {
-        const request = call.request;
-        console.log(`[Node ${this.nodeId}] RPC AppendEntries from Leader ${request.leaderId} | Term ${request.term}`);
+        const req = call.request;
 
-        if (request.term < this.currentTerm) {
+        if (req.term < this.currentTerm) {
             return callback(null, { term: this.currentTerm, success: false });
         }
 
-        if (request.term > this.currentTerm) {
-            this.currentTerm = request.term;
-            this.votedFor = null;
+        this.state = 'follower';
+        this.currentTerm = req.term;
+        this.leaderId = req.leaderId;
+        this.lastHeartbeat = Date.now();
+
+        // Simple consistency check (would include prevLogIndex/Term for full correctness)
+        for (let i = 0; i < req.entries.length; i++) {
+            const entry = req.entries[i];
+            const index = this.log.length + i;
+            if (!this.log[index] || this.log[index].term !== entry.term) {
+                this.log = this.log.slice(0, index);
+                this.log.push(...req.entries.slice(i));
+                break;
+            }
         }
 
-        this.state = 'follower';
-        this.leaderId = request.leaderId;
-        this.lastHeartbeat = Date.now();
+        if (req.leaderCommit > this.commitIndex) {
+            this.commitIndex = Math.min(req.leaderCommit, this.log.length - 1);
+        }
 
         callback(null, { term: this.currentTerm, success: true });
     }
 
-    // ===== Election Logic =====
-
     electionTimer() {
         if (this.state === 'leader') return;
-        const elapsed = Date.now() - this.lastHeartbeat;
-        if (elapsed >= this.electionTimeout) {
+        if (Date.now() - this.lastHeartbeat >= this.electionTimeout) {
             this.startElection();
         }
     }
@@ -99,94 +120,123 @@ class RaftNode {
         this.lastHeartbeat = Date.now();
         this.electionTimeout = this.resetElectionTimeout();
 
-        console.log(`[Node ${this.nodeId}] Starting election for Term ${this.currentTerm}`);
+        for (const peer of this.peers) {
+            const client = new raftProto.Raft(peer, grpc.credentials.createInsecure());
+            const req = { term: this.currentTerm, candidateId: this.nodeId };
 
-        this.peers.forEach(peer => {
-            this.sendRequestVote(peer);
-        });
-    }
-
-    sendRequestVote(peer) {
-        const client = new raftProto.Raft(peer, grpc.credentials.createInsecure());
-        const request = { term: this.currentTerm, candidateId: this.nodeId };
-
-        console.log(`[Node ${this.nodeId}] Sending RequestVote to ${peer}`);
-        client.RequestVote(request, (err, response) => {
-            if (err) {
-                console.log(`[Node ${this.nodeId}] Failed to contact ${peer} during election - ${err.message}`);
-                return;
-            }
-
-            if (response.term > this.currentTerm) {
-                this.currentTerm = response.term;
-                this.state = 'follower';
-                this.votedFor = null;
-                return;
-            }
-
-            if (response.voteGranted && this.state === 'candidate') {
-                this.votesReceived += 1;
-                if (this.votesReceived > (this.peers.length + 1) / 2) {
-                    this.becomeLeader();
+            client.RequestVote(req, (err, res) => {
+                if (err || !res) return;
+                if (res.term > this.currentTerm) {
+                    this.currentTerm = res.term;
+                    this.state = 'follower';
+                    this.votedFor = null;
+                } else if (res.voteGranted && this.state === 'candidate') {
+                    this.votesReceived += 1;
+                    if (this.votesReceived > (this.peers.length + 1) / 2) {
+                        this.becomeLeader();
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     becomeLeader() {
-        console.log(`[Node ${this.nodeId}] Became leader in Term ${this.currentTerm}`);
         this.state = 'leader';
         this.leaderId = this.nodeId;
-        this.lastHeartbeat = Date.now();
+        for (const peer of this.peers) {
+            this.nextIndex[peer] = this.log.length;
+            this.matchIndex[peer] = -1;
+        }
     }
 
     heartbeatSender() {
         if (this.state !== 'leader') return;
 
-        this.peers.forEach(peer => {
-            this.sendAppendEntries(peer);
-        });
+        for (const peer of this.peers) {
+            this.replicateLog(peer);
+        }
     }
 
-    sendAppendEntries(peer) {
+    replicateLog(peer) {
         const client = new raftProto.Raft(peer, grpc.credentials.createInsecure());
-        const request = { term: this.currentTerm, leaderId: this.nodeId };
+        const nextIdx = this.nextIndex[peer] || 0;
 
-        console.log(`[Node ${this.nodeId}] Sending AppendEntries to ${peer}`);
-        client.AppendEntries(request, (err, response) => {
-            if (err) {
-                console.log(`[Node ${this.nodeId}] Failed to send heartbeat to ${peer} - ${err.message}`);
+        const entries = this.log.slice(nextIdx);
+
+        const req = {
+            term: this.currentTerm,
+            leaderId: this.nodeId,
+            entries: entries,
+            leaderCommit: this.commitIndex
+        };
+
+        client.AppendEntries(req, (err, res) => {
+            if (err || !res) return;
+            if (res.term > this.currentTerm) {
+                this.currentTerm = res.term;
+                this.state = 'follower';
+                this.votedFor = null;
                 return;
             }
 
-            if (response.term > this.currentTerm) {
-                this.currentTerm = response.term;
-                this.state = 'follower';
-                this.votedFor = null;
+            if (res.success) {
+                this.matchIndex[peer] = nextIdx + entries.length - 1;
+                this.nextIndex[peer] = this.matchIndex[peer] + 1;
+
+                this.tryCommit();
+            } else {
+                this.nextIndex[peer] = Math.max(0, nextIdx - 1); // Back off
             }
         });
     }
+
+    tryCommit() {
+        const match = Object.values(this.matchIndex).concat(this.log.length - 1);
+        match.sort((a, b) => b - a); // descending
+        const N = match[Math.floor(this.peers.length / 2)];
+
+        if (N > this.commitIndex && this.log[N] && this.log[N].term === this.currentTerm) {
+            this.commitIndex = N;
+        }
+    }
+
+    applyCommittedEntries() {
+        while (this.lastApplied < this.commitIndex) {
+            this.lastApplied += 1;
+            const entry = this.log[this.lastApplied];
+            console.log(`[Node ${this.nodeId}] Applying log: ${JSON.stringify(entry)} at index ${this.lastApplied}`);
+        }
+    }
+
+    simulateClientCommand() {
+        if (this.state !== 'leader') return;
+
+        const command = `set x=${Math.floor(Math.random() * 100)}`;
+        this.log.push({ term: this.currentTerm, command });
+        console.log(`[Node ${this.nodeId}] Received client command: ${command}`);
+    }
 }
 
-// ===== Server Setup =====
-
 function main() {
-    const nodeId = parseInt(process.env.NODE_ID) || Math.floor(1000 + Math.random() * 9000);
+    const nodeId = parseInt(process.env.NODE_ID) || Math.floor(Math.random() * 10000);
     const port = parseInt(process.env.PORT) || 5000;
-    const peers = process.env.PEERS ? process.env.PEERS.split(',').map(p => p.trim()) : [];
+    const peers = process.env.PEERS ? process.env.PEERS.split(',') : [];
 
     const server = new grpc.Server();
-    const raftNode = new RaftNode(nodeId, peers);
+    const node = new RaftNode(nodeId, peers);
 
     server.addService(raftProto.Raft.service, {
-        RequestVote: raftNode.RequestVote.bind(raftNode),
-        AppendEntries: raftNode.AppendEntries.bind(raftNode)
+        RequestVote: node.RequestVote.bind(node),
+        AppendEntries: node.AppendEntries.bind(node),
+        ClientRequest: node.ClientRequest.bind(node),
     });
 
-    const address = `0.0.0.0:${port}`;
-    server.bindAsync(address, grpc.ServerCredentials.createInsecure(), () => {
+    server.bindAsync(`0.0.0.0:${port}`, grpc.ServerCredentials.createInsecure(), (err, port) => {
+        if (err) {
+            console.log(`[Node ${this.nodeId}] Error: ${err.message}`);
+            return;
+        }
         console.log(`[Node ${nodeId}] Running on port ${port}`);
-        server.start();
     });
 }
 

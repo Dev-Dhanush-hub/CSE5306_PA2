@@ -4,37 +4,37 @@
 var grpc = require('grpc');
 var raft_pb = require('./raft_pb.js');
 
-function serialize_raft_AppendRequest(arg) {
-  if (!(arg instanceof raft_pb.AppendRequest)) {
-    throw new Error('Expected argument of type raft.AppendRequest');
+function serialize_raft_AppendEntriesRequest(arg) {
+  if (!(arg instanceof raft_pb.AppendEntriesRequest)) {
+    throw new Error('Expected argument of type raft.AppendEntriesRequest');
   }
   return Buffer.from(arg.serializeBinary());
 }
 
-function deserialize_raft_AppendRequest(buffer_arg) {
-  return raft_pb.AppendRequest.deserializeBinary(new Uint8Array(buffer_arg));
+function deserialize_raft_AppendEntriesRequest(buffer_arg) {
+  return raft_pb.AppendEntriesRequest.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
-function serialize_raft_AppendResponse(arg) {
-  if (!(arg instanceof raft_pb.AppendResponse)) {
-    throw new Error('Expected argument of type raft.AppendResponse');
+function serialize_raft_AppendEntriesResponse(arg) {
+  if (!(arg instanceof raft_pb.AppendEntriesResponse)) {
+    throw new Error('Expected argument of type raft.AppendEntriesResponse');
   }
   return Buffer.from(arg.serializeBinary());
 }
 
-function deserialize_raft_AppendResponse(buffer_arg) {
-  return raft_pb.AppendResponse.deserializeBinary(new Uint8Array(buffer_arg));
+function deserialize_raft_AppendEntriesResponse(buffer_arg) {
+  return raft_pb.AppendEntriesResponse.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
-function serialize_raft_ClientOperation(arg) {
-  if (!(arg instanceof raft_pb.ClientOperation)) {
-    throw new Error('Expected argument of type raft.ClientOperation');
+function serialize_raft_ClientCommand(arg) {
+  if (!(arg instanceof raft_pb.ClientCommand)) {
+    throw new Error('Expected argument of type raft.ClientCommand');
   }
   return Buffer.from(arg.serializeBinary());
 }
 
-function deserialize_raft_ClientOperation(buffer_arg) {
-  return raft_pb.ClientOperation.deserializeBinary(new Uint8Array(buffer_arg));
+function deserialize_raft_ClientCommand(buffer_arg) {
+  return raft_pb.ClientCommand.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
 function serialize_raft_ClientResponse(arg) {
@@ -48,26 +48,26 @@ function deserialize_raft_ClientResponse(buffer_arg) {
   return raft_pb.ClientResponse.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
-function serialize_raft_VoteRequest(arg) {
-  if (!(arg instanceof raft_pb.VoteRequest)) {
-    throw new Error('Expected argument of type raft.VoteRequest');
+function serialize_raft_RequestVoteRequest(arg) {
+  if (!(arg instanceof raft_pb.RequestVoteRequest)) {
+    throw new Error('Expected argument of type raft.RequestVoteRequest');
   }
   return Buffer.from(arg.serializeBinary());
 }
 
-function deserialize_raft_VoteRequest(buffer_arg) {
-  return raft_pb.VoteRequest.deserializeBinary(new Uint8Array(buffer_arg));
+function deserialize_raft_RequestVoteRequest(buffer_arg) {
+  return raft_pb.RequestVoteRequest.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
-function serialize_raft_VoteResponse(arg) {
-  if (!(arg instanceof raft_pb.VoteResponse)) {
-    throw new Error('Expected argument of type raft.VoteResponse');
+function serialize_raft_RequestVoteResponse(arg) {
+  if (!(arg instanceof raft_pb.RequestVoteResponse)) {
+    throw new Error('Expected argument of type raft.RequestVoteResponse');
   }
   return Buffer.from(arg.serializeBinary());
 }
 
-function deserialize_raft_VoteResponse(buffer_arg) {
-  return raft_pb.VoteResponse.deserializeBinary(new Uint8Array(buffer_arg));
+function deserialize_raft_RequestVoteResponse(buffer_arg) {
+  return raft_pb.RequestVoteResponse.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
 
@@ -76,35 +76,36 @@ var RaftService = exports.RaftService = {
     path: '/raft.Raft/RequestVote',
     requestStream: false,
     responseStream: false,
-    requestType: raft_pb.VoteRequest,
-    responseType: raft_pb.VoteResponse,
-    requestSerialize: serialize_raft_VoteRequest,
-    requestDeserialize: deserialize_raft_VoteRequest,
-    responseSerialize: serialize_raft_VoteResponse,
-    responseDeserialize: deserialize_raft_VoteResponse,
+    requestType: raft_pb.RequestVoteRequest,
+    responseType: raft_pb.RequestVoteResponse,
+    requestSerialize: serialize_raft_RequestVoteRequest,
+    requestDeserialize: deserialize_raft_RequestVoteRequest,
+    responseSerialize: serialize_raft_RequestVoteResponse,
+    responseDeserialize: deserialize_raft_RequestVoteResponse,
   },
   appendEntries: {
     path: '/raft.Raft/AppendEntries',
     requestStream: false,
     responseStream: false,
-    requestType: raft_pb.AppendRequest,
-    responseType: raft_pb.AppendResponse,
-    requestSerialize: serialize_raft_AppendRequest,
-    requestDeserialize: deserialize_raft_AppendRequest,
-    responseSerialize: serialize_raft_AppendResponse,
-    responseDeserialize: deserialize_raft_AppendResponse,
+    requestType: raft_pb.AppendEntriesRequest,
+    responseType: raft_pb.AppendEntriesResponse,
+    requestSerialize: serialize_raft_AppendEntriesRequest,
+    requestDeserialize: deserialize_raft_AppendEntriesRequest,
+    responseSerialize: serialize_raft_AppendEntriesResponse,
+    responseDeserialize: deserialize_raft_AppendEntriesResponse,
   },
   clientRequest: {
     path: '/raft.Raft/ClientRequest',
     requestStream: false,
     responseStream: false,
-    requestType: raft_pb.ClientOperation,
+    requestType: raft_pb.ClientCommand,
     responseType: raft_pb.ClientResponse,
-    requestSerialize: serialize_raft_ClientOperation,
-    requestDeserialize: deserialize_raft_ClientOperation,
+    requestSerialize: serialize_raft_ClientCommand,
+    requestDeserialize: deserialize_raft_ClientCommand,
     responseSerialize: serialize_raft_ClientResponse,
     responseDeserialize: deserialize_raft_ClientResponse,
   },
+  // NEW RPC
 };
 
 exports.RaftClient = grpc.makeGenericClientConstructor(RaftService, 'Raft');
