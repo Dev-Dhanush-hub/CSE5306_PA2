@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package proto.transaction;
+
+service Participant {
+  rpc Prepare(Request) returns (Response);
+  rpc Commit(Request) returns (Response);
+  rpc Abort(Request) returns (Response);
+}
+
+service Coordinator {
+  rpc StartTransaction(Request) returns (Response);
+  rpc Join(JoinRequest) returns (JoinResponse);  // New method
+}
+
+message Request {
+  string transaction_id = 1;
+  string payload = 2;
+}
+
+message Response {
+  string transaction_id = 1;
+  string status = 2;
+}
+
+message JoinRequest {
+  string address = 1; // e.g., "participant1:50052"
+}
+
+message JoinResponse {
+  string status = 1;  // e.g., "REGISTERED" or "FAILED"
+}

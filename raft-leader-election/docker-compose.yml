@@ -1,0 +1,80 @@
+version: '3'
+services:
+  node1:
+    build: .
+    container_name: node1
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ID=1
+      - PORT=5001
+      - PEERS=node2:5002,node3:5003,node4:5004,node5:5005
+    ports:
+      - "5001:5001"
+    stdin_open: true
+    tty: true
+    networks:
+      - raft_network
+
+  node2:
+    build: .
+    container_name: node2
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ID=2
+      - PORT=5002
+      - PEERS=node1:5001,node3:5003,node4:5004,node5:5005
+    ports:
+      - "5002:5002"
+    stdin_open: true
+    tty: true
+    networks:
+      - raft_network
+
+  node3:
+    build: .
+    container_name: node3
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ID=3
+      - PORT=5003
+      - PEERS=node1:5001,node2:5002,node4:5004,node5:5005
+    ports:
+      - "5003:5003"
+    stdin_open: true
+    tty: true
+    networks:
+      - raft_network
+
+  node4:
+    build: .
+    container_name: node4
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ID=4
+      - PORT=5004
+      - PEERS=node1:5001,node2:5002,node3:5003,node5:5005
+    ports:
+      - "5004:5004"
+    stdin_open: true
+    tty: true
+    networks:
+      - raft_network
+
+  node5:
+    build: .
+    container_name: node5
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ID=5
+      - PORT=5005
+      - PEERS=node1:5001,node2:5002,node3:5003,node4:5004
+    ports:
+      - "5005:5005"
+    stdin_open: true
+    tty: true
+    networks:
+      - raft_network
+
+networks:
+  raft_network:
+    driver: bridge

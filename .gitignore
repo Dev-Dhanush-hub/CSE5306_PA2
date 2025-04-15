@@ -1,5 +1,9 @@
 .venv
+.idea
+
+**/.DS_Store
 
 **/*.db
 
 participants.json
+

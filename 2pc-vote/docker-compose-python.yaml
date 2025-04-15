@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  coordinator:
+    build:
+      context: .
+      dockerfile: Docker/Coordinator.python.Dockerfile
+    environment:
+      - PORT=8080
+      - PARTICIPANTS_FILE=participants.json
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8080:8080"
+    depends_on:
+      - participant_1
+      - participant_2
+    networks:
+      - coordinator_network
+
+  participant_1:
+    build:
+      context: .
+      dockerfile: Docker/Participant.python.Dockerfile
+    environment:
+      - PORT=8081
+      - COORDINATOR_ADDRESS=coordinator:8080
+      - HOSTNAME=participant_1
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8081:8081"
+    networks:
+      - coordinator_network
+
+  participant_2:
+    build:
+      context: .
+      dockerfile: Docker/Participant.python.Dockerfile
+    environment:
+      - PORT=8082
+      - COORDINATOR_ADDRESS=coordinator:8080
+      - HOSTNAME=participant_2
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8082:8082"
+    networks:
+      - coordinator_network
+
+networks:
+  coordinator_network:
+    driver: bridge
