@@ -20,22 +20,28 @@ class RaftNode(raft_pb2_grpc.RaftServicer):
         self.votes_received = 0
         self.leader_id = None
         self.last_heartbeat = time.time()
-        self.election_timeout = random.uniform(1.5, 3.0)
+        self.election_timeout = self.reset_election_timeout()
 
         # Start background threads
         threading.Thread(target=self.election_timer, daemon=True).start()
         threading.Thread(target=self.heartbeat_sender, daemon=True).start()
 
+    def reset_election_timeout(self):
+        return random.uniform(1.5, 3.0)
+
     # ========== RPC Server Methods ==========
     def RequestVote(self, request, context):
         with self.lock:
-            print(f"Node {self.node_id} runs RPC RequestVote called by Node {request.candidateId}")
+            print(f"[Node {self.node_id}] RPC RequestVote from Node {request.candidateId} | Term {request.term}")
             if request.term < self.current_term:
                 return raft_pb2.VoteResponse(term=self.current_term, voteGranted=False)
 
-            if (self.voted_for is None or self.voted_for == request.candidateId) and request.term >= self.current_term:
-                self.voted_for = request.candidateId
+            if request.term > self.current_term:
                 self.current_term = request.term
+                self.voted_for = None
+
+            if self.voted_for is None or self.voted_for == request.candidateId:
+                self.voted_for = request.candidateId
                 self.state = 'follower'
                 self.last_heartbeat = time.time()
                 return raft_pb2.VoteResponse(term=self.current_term, voteGranted=True)
@@ -44,11 +50,14 @@ class RaftNode(raft_pb2_grpc.RaftServicer):
 
     def AppendEntries(self, request, context):
         with self.lock:
-            print(f"Node {self.node_id} runs RPC AppendEntries called by Node {request.leaderId}")
+            print(f"[Node {self.node_id}] RPC AppendEntries from Leader {request.leaderId} | Term {request.term}")
             if request.term < self.current_term:
                 return raft_pb2.AppendResponse(term=self.current_term, success=False)
 
-            self.current_term = request.term
+            if request.term > self.current_term:
+                self.current_term = request.term
+                self.voted_for = None
+
             self.state = 'follower'
             self.leader_id = request.leaderId
             self.last_heartbeat = time.time()
@@ -69,8 +78,11 @@ class RaftNode(raft_pb2_grpc.RaftServicer):
         self.state = 'candidate'
         self.current_term += 1
         self.voted_for = self.node_id
-        self.votes_received = 1  # vote for self
-        print(f"Node {self.node_id} starting election for term {self.current_term}")
+        self.votes_received = 1
+        self.last_heartbeat = time.time()
+        self.election_timeout = self.reset_election_timeout()
+
+        print(f"[Node {self.node_id}] Starting election for Term {self.current_term}")
 
         for peer in self.peers:
             threading.Thread(target=self.send_request_vote, args=(peer,), daemon=True).start()
@@ -80,20 +92,28 @@ class RaftNode(raft_pb2_grpc.RaftServicer):
         try:
             with grpc.insecure_channel(peer_address) as channel:
                 stub = raft_pb2_grpc.RaftStub(channel)
-                print(f"Node {self.node_id} sends RPC RequestVote to Node {peer_address}")
-                response = stub.RequestVote(raft_pb2.VoteRequest(term=self.current_term, candidateId=self.node_id))
+                print(f"[Node {self.node_id}] Sending RequestVote to {peer_address}")
+                response = stub.RequestVote(
+                    raft_pb2.VoteRequest(term=self.current_term, candidateId=self.node_id)
+                )
                 with self.lock:
+                    if response.term > self.current_term:
+                        self.current_term = response.term
+                        self.state = 'follower'
+                        self.voted_for = None
+                        return
                     if response.voteGranted:
                         self.votes_received += 1
                         if self.votes_received > (len(self.peers) + 1) // 2 and self.state == 'candidate':
                             self.become_leader()
-        except:
-            print(f"Node {self.node_id} failed to reach peer {peer_address}")
+        except Exception as e:
+            print(f"[Node {self.node_id}] Failed to contact {peer_address} during election - {e}")
 
     def become_leader(self):
-        print(f"Node {self.node_id} became the leader in term {self.current_term}")
+        print(f"[Node {self.node_id}] Became leader in Term {self.current_term}")
         self.state = 'leader'
         self.leader_id = self.node_id
+        self.last_heartbeat = time.time()
 
     # ========== Send Heartbeats ==========
     def heartbeat_sender(self):
@@ -109,10 +129,17 @@ class RaftNode(raft_pb2_grpc.RaftServicer):
         try:
             with grpc.insecure_channel(peer_address) as channel:
                 stub = raft_pb2_grpc.RaftStub(channel)
-                print(f"Node {self.node_id} sends RPC AppendEntries to Node {peer_address}")
-                stub.AppendEntries(raft_pb2.AppendRequest(term=self.current_term, leaderId=self.node_id))
-        except:
-            print(f"Node {self.node_id} failed to send heartbeat to {peer_address}")
+                print(f"[Node {self.node_id}] Sending AppendEntries to {peer_address}")
+                response = stub.AppendEntries(
+                    raft_pb2.AppendRequest(term=self.current_term, leaderId=self.node_id)
+                )
+                with self.lock:
+                    if response.term > self.current_term:
+                        self.current_term = response.term
+                        self.state = 'follower'
+                        self.voted_for = None
+        except Exception as e:
+            print(f"[Node {self.node_id}] Failed to send heartbeat to {peer_address} - {e}")
 
 # ========== Server Setup ==========
 def serve(node_id, port, peers):
@@ -121,14 +148,14 @@ def serve(node_id, port, peers):
     raft_pb2_grpc.add_RaftServicer_to_server(raft_node, server)
     server.add_insecure_port(f'[::]:{port}')
     server.start()
-    print(f"Node {node_id} running on port {port}")
+    print(f"[Node {node_id}] Running on port {port}")
     server.wait_for_termination()
 
 # ========== Main ==========
 if __name__ == '__main__':
-    node_id = int(os.environ.get('NODE_ID', random.randint(1000, 9999)))
-    port = int(os.environ.get('PORT', 5000))
-    peers = os.environ.get('PEERS', '')  # comma-separated string
-    peer_list = [p.strip() for p in peers.split(',')] if peers else []
+    node_identifier = int(os.environ.get('NODE_ID', random.randint(1000, 9999)))
+    node_port = int(os.environ.get('PORT', 5000))
+    node_peers = os.environ.get('PEERS', '')  # comma-separated string
+    peer_list = [p.strip() for p in node_peers.split(',')] if node_peers else []
 
-    serve(node_id, port, peer_list)
+    serve(node_identifier, node_port, peer_list)

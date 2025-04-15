@@ -5,6 +5,8 @@ package raft;
 service Raft {
   rpc RequestVote (VoteRequest) returns (VoteResponse);
   rpc AppendEntries (AppendRequest) returns (AppendResponse);
+  rpc ReplicateLog (LogRequest) returns (LogResponse);
+  rpc ClientRequest (LogEntry) returns (LogResponse);
 }
 
 message VoteRequest {
@@ -25,4 +27,21 @@ message AppendRequest {
 message AppendResponse {
   int32 term = 1;
   bool success = 2;
+}
+
+message LogEntry {
+  string operation = 1;
+  int32 term = 2;
+  int32 index = 3;
+}
+
+message LogRequest {
+  repeated LogEntry entries = 1;
+  int32 commitIndex = 2;
+  int32 leaderId = 3;
+}
+
+message LogResponse {
+  bool success = 1;
+  int32 followerId = 2;
 }
