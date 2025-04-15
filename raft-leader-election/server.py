@@ -27,7 +27,9 @@ class RaftNode(raft_pb2_grpc.RaftServicer):
         threading.Thread(target=self.heartbeat_sender, daemon=True).start()
 
     def reset_election_timeout(self):
-        return random.uniform(1.5, 3.0)
+        timeout = random.uniform(1.5, 3.0)
+        print(f"[Node {self.node_id}] Election timeout reset to {timeout:.2f} seconds")
+        return timeout
 
     # ========== RPC Server Methods ==========
     def RequestVote(self, request, context):
@@ -118,7 +120,7 @@ class RaftNode(raft_pb2_grpc.RaftServicer):
     # ========== Send Heartbeats ==========
     def heartbeat_sender(self):
         while True:
-            time.sleep(1)
+            time.sleep(1)  # Heartbeat interval is 1 second
             with self.lock:
                 if self.state != 'leader':
                     continue

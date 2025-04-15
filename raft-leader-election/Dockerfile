@@ -6,6 +6,4 @@ COPY . /app
 
 RUN pip install grpcio grpcio-tools
 
-EXPOSE 5000
-
 CMD ["python", "server.py"]
